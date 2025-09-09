@@ -582,12 +582,17 @@
 
         card.classList.remove('loading');
       } catch (err) {
-        card.classList.remove('loading');
-        card.classList.add('error');
-        const msg = document.createElement('div');
-        msg.style.padding = '12px 14px';
-        msg.innerHTML = `Failed to load data for <strong>${specLabel(specA)}</strong> vs <strong>${specLabel(specB)}</strong> — ${err.message}`;
-        card.appendChild(msg);
+        if (err && typeof err.message === 'string' && /Insufficient overlapping data/i.test(err.message)) {
+          // Hide cards with insufficient overlapping data instead of showing an error
+          card.remove();
+        } else {
+          card.classList.remove('loading');
+          card.classList.add('error');
+          const msg = document.createElement('div');
+          msg.style.padding = '12px 14px';
+          msg.innerHTML = `Failed to load data for <strong>${specLabel(specA)}</strong> vs <strong>${specLabel(specB)}</strong> — ${err.message}`;
+          card.appendChild(msg);
+        }
       }
     }
   }
