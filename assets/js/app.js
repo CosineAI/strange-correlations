@@ -1,11 +1,8 @@
 /**
- * Spurious-ish Correlations — Wikipedia Pageviews Edition
- * Fetches pageview counts for pairs of Wikipedia articles and renders:
- *  - A dual time-series line chart (monthly views)
- *  - A scatter plot with linear regression and Pearson r
- *
- * Data source:
- *   - Wikimedia REST API (Pageviews): https://wikimedia.org/api/rest_v1/#/Pageviews%20data
+ * Spurious-ish Correlations — Multi-source Edition
+ * Renders 50+ playful correlations from a mix of public web APIs.
+ * Providers include: Wikimedia Pageviews, Open‑Meteo, ExchangeRate.host,
+ * CoinGecko, OpenAlex, USGS Earthquakes, disease.sh (COVID-19), World Bank.
  */
 
 (() => {
@@ -14,69 +11,48 @@
   const granularitySelect = document.getElementById('granularity');
   const reloadBtn = document.getElementById('reload');
 
-  // 20 "strange" pairs of topics
-  const PAIRS = [
-    ["Nicolas Cage", "Beekeeping"],
-    ["Quantum entanglement", "Banana bread"],
-    ["Cryptozoology", "Pineapple"],
-    ["Pokémon", "Gasoline"],
-    ["Corgi", "Blockchain"],
-    ["Astrology", "Astronomy"],
-    ["Loch Ness Monster", "Cat"],
-    ["Unidentified flying object", "Sourdough"],
-    ["Peanut butter", "Lightning"],
-    ["Kombucha", "Crop circle"],
-    ["Artificial intelligence", "Toilet paper"],
-    ["Roller coaster", "Knitting"],
-    ["Flat Earth", "Vaccination"],
-    ["Trombone", "Supernova"],
-    ["Guitar", "Volcano"],
-    ["Llama", "Meme"],
-    ["Minecraft", "Kale"],
-    ["TikTok", "Chess"],
-    ["Hamster", "Mars"],
-    ["Zombie", "Quantum computing"]
-  ];
-
-  // Helpers
   const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
-  const fmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 });
+  const fmt3 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 });
+  const nf0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 
   const monthLabel = (yyyymm) => `${yyyymm.slice(0,4)}-${yyyymm.slice(4,6)}`;
+  const toMonthKey = (d) => `${d.getFullYear()}${`${d.getMonth()+1}`.padStart(2,'0')}`;
+  const toISO = (d) => `${d.getFullYear()}-${`${d.getMonth()+1}`.padStart(2,'0')}-${`${d.getDate()}`.padStart(2,'0')}`;
 
   function lastFullMonth() {
     const d = new Date();
-    d.setDate(1); // go to the first of this month
+    d.setDate(1);
     d.setHours(0,0,0,0);
-    d.setMonth(d.getMonth() - 1); // previous month
+    d.setMonth(d.getMonth() - 1);
     return d;
   }
-
+  function addMonths(date, delta) {
+    const d = new Date(date.getTime());
+    d.setMonth(d.getMonth() + delta);
+    return d;
+  }
+  function rangeDates(backMonths) {
+    const endMonth = lastFullMonth();
+    const startMonth = addMonths(endMonth, -backMonths + 1);
+    startMonth.setDate(1);
+    const endDate = new Date(endMonth.getFullYear(), endMonth.getMonth() + 1, 0);
+    return { startDate: startMonth, endDate, endMonth };
+  }
   function yyyymmdd(date) {
     const y = date.getFullYear();
     const m = `${date.getMonth() + 1}`.padStart(2, '0');
     const d = `${date.getDate()}`.padStart(2, '0');
     return `${y}${m}${d}`;
   }
-
-  function addMonths(date, delta) {
-    const d = new Date(date.getTime());
-    d.setMonth(d.getMonth() + delta);
-    return d;
-  }
-
   function getRangeMonths(backMonths, granularity) {
-    // For daily we fetch backMonths*30-ish days; for monthly exactly backMonths months
     const end = lastFullMonth();
     let start;
     if (granularity === 'monthly') {
       start = addMonths(end, -backMonths + 1);
       start.setDate(1);
     } else {
-      // daily: approximate by subtracting backMonths months and then going to 1st
       start = addMonths(end, -backMonths + 1);
     }
-    // API requires day component; for monthly it expects YYYYMM01
     if (granularity === 'monthly') {
       start.setDate(1);
       end.setDate(1);
@@ -88,52 +64,263 @@
     return { start: yyyymmdd(start), end: yyyymmdd(end) };
   }
 
+  // Wikimedia Pageviews (existing)
   async function fetchPageviews(article, backMonths = 36, granularity = 'monthly') {
-    // Build endpoint
     const project = 'en.wikipedia.org';
     const access = 'all-access';
     const agent = 'user';
     const range = getRangeMonths(backMonths, granularity);
     const encoded = encodeURIComponent(article);
     const url = `https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/${project}/${access}/${agent}/${encoded}/${granularity}/${range.start}/${range.end}`;
-
     const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status} for ${article}`);
-    }
+    if (!res.ok) throw new Error(`HTTP ${res.status} for ${article}`);
     const data = await res.json();
     const items = data.items || [];
-
-    // Normalize to map keyed by yyyymm (for monthly) or yyyymmdd (for daily)
     const out = new Map();
     for (const it of items) {
-      const ts = it.timestamp; // e.g., 2023010100
+      const ts = it.timestamp;
       const key = granularity === 'monthly' ? ts.slice(0,6) : ts.slice(0,8);
       out.set(key, it.views);
     }
     return out;
   }
 
-  function intersectKeys(mapA, mapB) {
-    const keys = [];
-    for (const k of mapA.keys()) {
-      if (mapB.has(k)) keys.push(k);
+  // Aggregation helpers
+  function aggregateMonthlyAvgFromDaily(dateStrs, values) {
+    const sum = new Map();
+    const count = new Map();
+    for (let i = 0; i < dateStrs.length; i++) {
+      const iso = dateStrs[i];
+      const yyyymm = iso.replace(/-/g,'').slice(0,6);
+      const v = values[i];
+      if (v == null || Number.isNaN(v)) continue;
+      sum.set(yyyymm, (sum.get(yyyymm) || 0) + v);
+      count.set(yyyymm, (count.get(yyyymm) || 0) + 1);
     }
-    keys.sort(); // chronological
-    return keys;
+    const out = new Map();
+    for (const [k, s] of sum.entries()) {
+      out.set(k, s / (count.get(k) || 1));
+    }
+    return out;
+  }
+  function aggregateMonthlySumFromDaily(dateStrs, values) {
+    const sum = new Map();
+    for (let i = 0; i < dateStrs.length; i++) {
+      const iso = dateStrs[i];
+      const yyyymm = iso.replace(/-/g,'').slice(0,6);
+      const v = values[i];
+      if (v == null || Number.isNaN(v)) continue;
+      sum.set(yyyymm, (sum.get(yyyymm) || 0) + v);
+    }
+    return sum;
   }
 
+  // Providers
+  const Providers = {
+    wp: {
+      supports: { daily: true, monthly: true },
+      label: (spec) => spec.title,
+      source: (spec) => `https://en.wikipedia.org/wiki/${encodeURIComponent(spec.title.replace(/ /g, '_'))}`,
+      fetch: (spec, backMonths, granularity) => fetchPageviews(spec.title, backMonths, granularity)
+    },
+    open_meteo: {
+      supports: { daily: true, monthly: true },
+      label: (spec) => spec.label || `Open‑Meteo ${spec.variable} (${spec.lat.toFixed(2)}, ${spec.lon.toFixed(2)})`,
+      source: () => 'https://open-meteo.com/en/docs',
+      fetch: async (spec, backMonths, granularity) => {
+        const { startDate, endDate } = rangeDates(backMonths);
+        const url = `https://archive-api.open-meteo.com/v1/era5?latitude=${spec.lat}&longitude=${spec.lon}&start_date=${toISO(startDate)}&end_date=${toISO(endDate)}&daily=${spec.variable}&timezone=UTC`;
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`Open‑Meteo ${r.status}`);
+        const j = await r.json();
+        const times = (j.daily && j.daily.time) || [];
+        const vals = (j.daily && j.daily[spec.variable]) || [];
+        if (granularity === 'daily') {
+          const out = new Map();
+          for (let i = 0; i < times.length; i++) {
+            const key = times[i].replace(/-/g,''); // yyyymmdd
+            out.set(key, vals[i]);
+          }
+          return out;
+        }
+        return aggregateMonthlyAvgFromDaily(times, vals);
+      }
+    },
+    exchangerate: {
+      supports: { daily: true, monthly: true },
+      label: (spec) => `${spec.base}→${spec.symbol} FX`,
+      source: () => 'https://exchangerate.host/#/',
+      fetch: async (spec, backMonths, granularity) => {
+        const { startDate, endDate } = rangeDates(backMonths);
+        const url = `https://api.exchangerate.host/timeseries?start_date=${toISO(startDate)}&end_date=${toISO(endDate)}&base=${encodeURIComponent(spec.base)}&symbols=${encodeURIComponent(spec.symbol)}`;
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`ExchangeRate.host ${r.status}`);
+        const j = await r.json();
+        const rates = j.rates || {};
+        const dates = Object.keys(rates).sort();
+        const vals = dates.map(d => rates[d]?.[spec.symbol]);
+        if (granularity === 'daily') {
+          const out = new Map();
+          for (let i = 0; i < dates.length; i++) out.set(dates[i].replace(/-/g,''), vals[i]);
+          return out;
+        }
+        return aggregateMonthlyAvgFromDaily(dates, vals);
+      }
+    },
+    coingecko: {
+      supports: { daily: true, monthly: true },
+      label: (spec) => `${spec.coinName || spec.coinId} price (${spec.vsCurrency.toUpperCase()})`,
+      source: (spec) => `https://www.coingecko.com/en/coins/${encodeURIComponent(spec.coinId)}`,
+      fetch: async (spec, backMonths, granularity) => {
+        const approxDays = Math.max(30, Math.min(3650, Math.ceil(backMonths * 31)));
+        const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(spec.coinId)}/market_chart?vs_currency=${encodeURIComponent(spec.vsCurrency)}&days=${approxDays}`;
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`CoinGecko ${r.status}`);
+        const j = await r.json();
+        const arr = j.prices || [];
+        const dates = arr.map(([ms]) => {
+          const d = new Date(ms);
+          return `${d.getFullYear()}-${`${d.getMonth()+1}`.padStart(2,'0')}-${`${d.getDate()}`.padStart(2,'0')}`;
+        });
+        const vals = arr.map(([,v]) => v);
+        if (granularity === 'daily') {
+          const out = new Map();
+          for (let i = 0; i < dates.length; i++) out.set(dates[i].replace(/-/g,''), vals[i]);
+          return out;
+        }
+        return aggregateMonthlyAvgFromDaily(dates, vals);
+      }
+    },
+    openalex: {
+      supports: { daily: false, monthly: true },
+      label: (spec) => `Publications mentioning ${spec.query}`,
+      source: (spec) => `https://api.openalex.org/works?search=${encodeURIComponent(spec.query)}`,
+      fetch: async (spec, backMonths) => {
+        const { startDate, endDate } = rangeDates(backMonths);
+        const url = `https://api.openalex.org/works?search=${encodeURIComponent(spec.query)}&group_by=publication_year&per_page=200&filter=from_publication_date:${toISO(addMonths(startDate, -24))},to_publication_date:${toISO(endDate)}`;
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`OpenAlex ${r.status}`);
+        const j = await r.json();
+        const groups = j.group_by || [];
+        const out = new Map();
+        for (const g of groups) {
+          const y = String(g.key || g.id || g.year || '');
+          if (!/^\d{4}$/.test(y)) continue;
+          const k = `${y}01`;
+          out.set(k, g.count || g.value || 0);
+        }
+        return out;
+      }
+    },
+    disease_sh: {
+      supports: { daily: true, monthly: true },
+      label: (spec) => `COVID‑19 ${spec.field} (${spec.country})`,
+      source: (spec) => `https://disease.sh/v3/covid-19/historical/${encodeURIComponent(spec.country)}?lastdays=all`,
+      fetch: async (spec, backMonths, granularity) => {
+        const approxDays = Math.max(30, Math.ceil(backMonths * 31));
+        const url = `https://disease.sh/v3/covid-19/historical/${encodeURIComponent(spec.country)}?lastdays=${approxDays}`;
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`disease.sh ${r.status}`);
+        const j = await r.json();
+        const tl = (j.timeline && j.timeline[spec.field]) || j[spec.field] || {};
+        const datesMDY = Object.keys(tl).sort((a,b)=> new Date(a) - new Date(b));
+        const isoDates = datesMDY.map(mdy => {
+          const d = new Date(mdy);
+          return `${d.getFullYear()}-${`${d.getMonth()+1}`.padStart(2,'0')}-${`${d.getDate()}`.padStart(2,'0')}`;
+        });
+        const cumVals = datesMDY.map(d => tl[d]);
+        // Convert cumulative to daily deltas (non-negative)
+        const daily = [];
+        for (let i = 1; i < cumVals.length; i++) {
+          const diff = (cumVals[i] ?? 0) - (cumVals[i-1] ?? 0);
+          daily.push(diff < 0 ? 0 : diff);
+        }
+        const dailyDates = isoDates.slice(1);
+        if (granularity === 'daily') {
+          const out = new Map();
+          for (let i = 0; i < dailyDates.length; i++) out.set(dailyDates[i].replace(/-/g,''), daily[i]);
+          return out;
+        }
+        return aggregateMonthlySumFromDaily(dailyDates, daily);
+      }
+    },
+    usgs_quakes: {
+      supports: { daily: true, monthly: true },
+      label: (spec) => `Earthquakes ≥${spec.minMagnitude}`,
+      source: () => 'https://earthquake.usgs.gov/fdsnws/event/1/',
+      fetch: async (spec, backMonths, granularity) => {
+        const { startDate, endDate } = rangeDates(backMonths);
+        const url = `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=${toISO(startDate)}&endtime=${toISO(endDate)}&minmagnitude=${encodeURIComponent(spec.minMagnitude)}`;
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`USGS ${r.status}`);
+        const j = await r.json();
+        const feats = j.features || [];
+        const isoDates = feats.map(f => {
+          const d = new Date(f.properties?.time || 0);
+          return `${d.getFullYear()}-${`${d.getMonth()+1}`.padStart(2,'0')}-${`${d.getDate()}`.padStart(2,'0')}`;
+        });
+        if (granularity === 'daily') {
+          const out = new Map();
+          for (const iso of isoDates) {
+            const k = iso.replace(/-/g,'');
+            out.set(k, (out.get(k) || 0) + 1);
+          }
+          return out;
+        }
+        return aggregateMonthlySumFromDaily(isoDates, isoDates.map(() => 1));
+      }
+    },
+    worldbank: {
+      supports: { daily: false, monthly: true },
+      label: (spec) => spec.label || `World Bank ${spec.indicator} (${spec.country})`,
+      source: (spec) => `https://data.worldbank.org/indicator/${encodeURIComponent(spec.indicator)}?locations=${encodeURIComponent(spec.country)}`,
+      fetch: async (spec) => {
+        const url = `https://api.worldbank.org/v2/country/${encodeURIComponent(spec.country)}/indicator/${encodeURIComponent(spec.indicator)}?format=json&per_page=2000`;
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`World Bank ${r.status}`);
+        const j = await r.json();
+        const arr = (j[1] || []).filter(row => row.value != null && /^\d{4}$/.test(row.date));
+        const out = new Map();
+        for (const row of arr) {
+          const k = `${row.date}01`;
+          out.set(k, row.value);
+        }
+        return out;
+      }
+    }
+  };
+
+  function providerSupportsDaily(spec) {
+    const p = Providers[spec.provider];
+    return !!(p && p.supports.daily);
+  }
+  function specLabel(spec) {
+    const p = Providers[spec.provider];
+    return p ? p.label(spec) : 'Unknown';
+    }
+  function specSource(spec) {
+    const p = Providers[spec.provider];
+    return p ? p.source(spec) : '#';
+  }
+  async function fetchSeries(spec, backMonths, granularity) {
+    const p = Providers[spec.provider];
+    if (!p) throw new Error(`Unknown provider: ${spec.provider}`);
+    const g = granularity || 'monthly';
+    return await p.fetch(spec, backMonths, g);
+  }
+  function intersectKeys(mapA, mapB) {
+    const keys = [];
+    for (const k of mapA.keys()) if (mapB.has(k)) keys.push(k);
+    keys.sort();
+    return keys;
+  }
   function zipAligned(mapA, mapB) {
     const keys = intersectKeys(mapA, mapB);
     const xs = [];
     const ys = [];
-    for (const k of keys) {
-      xs.push(mapA.get(k));
-      ys.push(mapB.get(k));
-    }
+    for (const k of keys) { xs.push(mapA.get(k)); ys.push(mapB.get(k)); }
     return { keys, xs, ys };
   }
-
   function pearsonR(xs, ys) {
     const n = Math.min(xs.length, ys.length);
     if (n < 3) return NaN;
@@ -149,7 +336,6 @@
     if (den === 0) return NaN;
     return num / den;
   }
-
   function linearRegression(xs, ys) {
     const n = Math.min(xs.length, ys.length);
     let sumX = 0, sumY = 0, sumXX = 0, sumXY = 0;
@@ -164,10 +350,6 @@
     return { m, b };
   }
 
-  function articleURL(title) {
-    return `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`;
-  }
-
   function colorFromIndex(i) {
     const palette = [
       '#6ac2ff', '#ff8aa8', '#ffd166', '#a0e7e5', '#bdb2ff',
@@ -177,7 +359,13 @@
     return palette[i % palette.length];
   }
 
-  function createCard(a, b) {
+  function createCard(specA, specB, granularity) {
+    const labelA = specLabel(specA);
+    const labelB = specLabel(specB);
+    const linkA = specSource(specA);
+    const linkB = specSource(specB);
+    const gBadge = granularity === 'daily' ? 'daily' : 'monthly';
+
     const card = document.createElement('article');
     card.className = 'card loading';
 
@@ -186,15 +374,15 @@
 
     const title = document.createElement('h3');
     title.className = 'card-title';
-    title.innerHTML = `<strong>${a}</strong> vs <strong>${b}</strong> <span class="badge">r = <span class="r">…</span></span>`;
+    title.innerHTML = `<strong>${labelA}</strong> vs <strong>${labelB}</strong> <span class="badge">r = <span class="r">…</span> • ${gBadge}</span>`;
     header.appendChild(title);
 
     const links = document.createElement('div');
     links.className = 'card-links';
     links.innerHTML = `
-      <a href="${articleURL(a)}" target="_blank" rel="noopener">Source A: ${a}</a>
-      <a href="${articleURL(b)}" target="_blank" rel="noopener">Source B: ${b}</a>
-      <a href="https://wikimedia.org/api/rest_v1/#/Pageviews%20data" target="_blank" rel="noopener">API docs</a>
+      <a href="${linkA}" target="_blank" rel="noopener">Source A</a>
+      <a href="${linkB}" target="_blank" rel="noopener">Source B</a>
+      <a href="https://wikimedia.org/api/rest_v1/#/Pageviews%20data" target="_blank" rel="noopener">Docs</a>
     `;
     header.appendChild(links);
 
@@ -216,7 +404,7 @@
 
     const footer = document.createElement('div');
     footer.className = 'card-footer';
-    footer.textContent = 'Left: monthly pageviews time series. Right: pageviews of A vs B with linear fit.';
+    footer.textContent = 'Left: time series. Right: A vs B with linear fit.';
 
     card.appendChild(header);
     card.appendChild(body);
@@ -228,17 +416,14 @@
       card,
       titleR: title.querySelector('.r'),
       lineCanvas,
-      scatterCanvas
+      scatterCanvas,
+      labelA,
+      labelB
     };
   }
 
   function makeLineChart(ctx, labels, seriesA, seriesB, labelA, labelB, colorA, colorB) {
-    const dsCommon = {
-      fill: false,
-      tension: 0.25,
-      pointRadius: 0,
-      pointHoverRadius: 2
-    };
+    const dsCommon = { fill: false, tension: 0.25, pointRadius: 0, pointHoverRadius: 2 };
     return new Chart(ctx, {
       type: 'line',
       data: {
@@ -252,24 +437,16 @@
         responsive: true,
         maintainAspectRatio: false,
         scales: {
-          y: {
-            grid: { color: 'rgba(255,255,255,0.06)' },
-            ticks: { color: '#a4a9b6' }
-          },
-          x: {
-            grid: { color: 'rgba(255,255,255,0.06)' },
-            ticks: { color: '#a4a9b6', maxRotation: 0, autoSkip: true, maxTicksLimit: 6 }
-          }
+          y: { grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#a4a9b6' } },
+          x: { grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#a4a9b6', maxRotation: 0, autoSkip: true, maxTicksLimit: 6 } }
         },
         plugins: {
-          legend: {
-            labels: { color: '#e6e8ef' }
-          },
+          legend: { labels: { color: '#e6e8ef' } },
           tooltip: {
             callbacks: {
               label: (ctx) => {
                 const v = ctx.parsed.y;
-                return `${ctx.dataset.label}: ${Intl.NumberFormat().format(v)} views`;
+                return `${ctx.dataset.label}: ${nf0.format(v)}`;
               }
             }
           }
@@ -292,50 +469,24 @@
       type: 'scatter',
       data: {
         datasets: [
-          {
-            label: `${labelA} vs ${labelB}`,
-            data: points,
-            backgroundColor: colorA,
-            borderColor: colorA
-          },
-          {
-            label: 'Linear fit',
-            type: 'line',
-            data: linePoints,
-            borderColor: colorB,
-            backgroundColor: colorB,
-            borderWidth: 2,
-            pointRadius: 0,
-            tension: 0
-          }
+          { label: `${labelA} vs ${labelB}`, data: points, backgroundColor: colorA, borderColor: colorA },
+          { label: 'Linear fit', type: 'line', data: linePoints, borderColor: colorB, backgroundColor: colorB, borderWidth: 2, pointRadius: 0, tension: 0 }
         ]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         scales: {
-          x: {
-            title: { display: true, text: `${labelA} monthly views`, color: '#a4a9b6' },
-            grid: { color: 'rgba(255,255,255,0.06)' },
-            ticks: { color: '#a4a9b6' }
-          },
-          y: {
-            title: { display: true, text: `${labelB} monthly views`, color: '#a4a9b6' },
-            grid: { color: 'rgba(255,255,255,0.06)' },
-            ticks: { color: '#a4a9b6' }
-          }
+          x: { title: { display: true, text: labelA, color: '#a4a9b6' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#a4a9b6' } },
+          y: { title: { display: true, text: labelB, color: '#a4a9b6' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#a4a9b6' } }
         },
         plugins: {
-          legend: {
-            labels: { color: '#e6e8ef' }
-          },
+          legend: { labels: { color: '#e6e8ef' } },
           tooltip: {
             callbacks: {
               label: (ctx) => {
                 const p = ctx.raw;
-                if (p && typeof p.x === 'number' && typeof p.y === 'number') {
-                  return `(${Intl.NumberFormat().format(p.x)}, ${Intl.NumberFormat().format(p.y)})`;
-                }
+                if (p && typeof p.x === 'number' && typeof p.y === 'number') return `(${nf0.format(p.x)}, ${nf0.format(p.y)})`;
                 return ctx.formattedValue;
               }
             }
@@ -345,34 +496,115 @@
     });
   }
 
+  // Build a large pool of series from diverse providers
+  const s = {
+    wp: (title) => ({ provider: 'wp', title }),
+    om: (label, lat, lon, variable) => ({ provider: 'open_meteo', label, lat, lon, variable }),
+    fx: (base, symbol) => ({ provider: 'exchangerate', base, symbol }),
+    cg: (coinId, vsCurrency, coinName) => ({ provider: 'coingecko', coinId, vsCurrency, coinName }),
+    oa: (query) => ({ provider: 'openalex', query }),
+    cv: (country, field='cases') => ({ provider: 'disease_sh', country, field }),
+    eq: (minMagnitude) => ({ provider: 'usgs_quakes', minMagnitude }),
+    wb: (country, indicator, label) => ({ provider: 'worldbank', country, indicator, label })
+  };
+
+  const SERIES_POOL = [
+    // Wikipedia
+    s.wp('Nicolas Cage'), s.wp('Beekeeping'), s.wp('Quantum entanglement'), s.wp('Banana bread'),
+    s.wp('Cryptozoology'), s.wp('Pineapple'), s.wp('Pokémon'), s.wp('Gasoline'),
+    s.wp('Corgi'), s.wp('Blockchain'), s.wp('Astrology'), s.wp('Astronomy'),
+    s.wp('Loch Ness Monster'), s.wp('Cat'), s.wp('Unidentified flying object'), s.wp('Sourdough'),
+    s.wp('Peanut butter'), s.wp('Lightning'), s.wp('Kombucha'), s.wp('Crop circle'),
+    s.wp('Artificial intelligence'), s.wp('Toilet paper'), s.wp('Roller coaster'), s.wp('Knitting'),
+    s.wp('Flat Earth'), s.wp('Vaccination'), s.wp('Trombone'), s.wp('Supernova'),
+    s.wp('Guitar'), s.wp('Volcano'), s.wp('Llama'), s.wp('Meme'),
+    s.wp('Minecraft'), s.wp('Kale'), s.wp('TikTok'), s.wp('Chess'),
+    s.wp('Hamster'), s.wp('Mars'), s.wp('Zombie'), s.wp('Quantum computing'),
+    // Open‑Meteo (various cities/metrics)
+    s.om('London precipitation', 51.5074, -0.1278, 'precipitation_sum'),
+    s.om('Seattle precipitation', 47.6062, -122.3321, 'precipitation_sum'),
+    s.om('Phoenix max temp', 33.4484, -112.0740, 'temperature_2m_max'),
+    s.om('Reykjavik max wind', 64.1466, -21.9426, 'windspeed_10m_max'),
+    s.om('Singapore precipitation', 1.3521, 103.8198, 'precipitation_sum'),
+    s.om('Cairo max temp', 30.0444, 31.2357, 'temperature_2m_max'),
+    s.om('Tokyo precipitation', 35.6762, 139.6503, 'precipitation_sum'),
+    s.om('Sydney max wind', -33.8688, 151.2093, 'windspeed_10m_max'),
+    s.om('Mumbai precipitation', 19.0760, 72.8777, 'precipitation_sum'),
+    s.om('São Paulo precipitation', -23.5505, -46.6333, 'precipitation_sum'),
+    // Exchange rates
+    s.fx('USD','EUR'), s.fx('USD','JPY'), s.fx('GBP','USD'), s.fx('EUR','CHF'), s.fx('AUD','USD'),
+    // Crypto (CoinGecko)
+    s.cg('bitcoin','usd','Bitcoin'), s.cg('ethereum','usd','Ethereum'),
+    s.cg('dogecoin','usd','Dogecoin'), s.cg('shiba-inu','usd','Shiba Inu'),
+    s.cg('litecoin','usd','Litecoin'),
+    // OpenAlex topics
+    s.oa('zombie'), s.oa('kombucha'), s.oa('banana bread'), s.oa('ufology'),
+    s.oa('corgi'), s.oa('sourdough'), s.oa('volcano'), s.oa('astrology'),
+    s.oa('meme'), s.oa('quantum entanglement'),
+    // COVID-19 (disease.sh)
+    s.cv('USA','cases'), s.cv('United Kingdom','cases'), s.cv('India','cases'), s.cv('Japan','cases'), s.cv('Brazil','cases'),
+    s.cv('USA','deaths'), s.cv('United Kingdom','deaths'), s.cv('India','deaths'),
+    // USGS earthquakes
+    s.eq(5.0), s.eq(6.0), s.eq(4.5),
+    // World Bank annual indicators
+    s.wb('USA','SP.POP.TOTL','USA population'), s.wb('JPN','SP.POP.TOTL','Japan population'),
+    s.wb('IND','SP.POP.TOTL','India population'), s.wb('BRA','SP.POP.TOTL','Brazil population'),
+    s.wb('USA','NY.GDP.PCAP.CD','USA GDP per capita (current US$)'),
+    s.wb('USA','EN.ATM.CO2E.PC','USA CO₂ emissions (t per capita)'),
+    s.wb('USA','IT.NET.USER.ZS','USA Internet users (%)'),
+    s.wb('ZAF','SP.POP.TOTL','South Africa population'),
+    s.wb('AUS','SP.POP.TOTL','Australia population')
+  ];
+
+  function randomInt(n) { return Math.floor(Math.random() * n); }
+  function pairGranularity(specA, specB, requested) {
+    if (requested === 'daily' && providerSupportsDaily(specA) && providerSupportsDaily(specB)) return 'daily';
+    return 'monthly';
+  }
+  function generatePairs(pool, count) {
+    const out = [];
+    const used = new Set();
+    while (out.length < count) {
+      const a = pool[randomInt(pool.length)];
+      const b = pool[randomInt(pool.length)];
+      if (a === b) continue;
+      const key = `${specLabel(a)}|${specLabel(b)}`;
+      if (used.has(key)) continue;
+      used.add(key);
+      out.push([a, b]);
+    }
+    return out;
+  }
+
   async function renderAll() {
     chartsRoot.innerHTML = '';
     const backMonths = clamp(parseInt(monthsSelect.value, 10) || 36, 6, 120);
-    const granularity = granularitySelect.value === 'daily' ? 'daily' : 'monthly';
+    const requestedGranularity = granularitySelect.value === 'daily' ? 'daily' : 'monthly';
+
+    const PAIRS = generatePairs(SERIES_POOL, 50);
 
     for (let i = 0; i < PAIRS.length; i++) {
-      const [a, b] = PAIRS[i];
-      const { card, titleR, lineCanvas, scatterCanvas } = createCard(a, b);
+      const [specA, specB] = PAIRS[i];
+      const g = pairGranularity(specA, specB, requestedGranularity);
+      const { card, titleR, lineCanvas, scatterCanvas, labelA, labelB } = createCard(specA, specB, g);
       const colorA = colorFromIndex(i * 2);
       const colorB = colorFromIndex(i * 2 + 1);
 
       try {
         const [mapA, mapB] = await Promise.all([
-          fetchPageviews(a, backMonths, granularity),
-          fetchPageviews(b, backMonths, granularity)
+          fetchSeries(specA, backMonths, g),
+          fetchSeries(specB, backMonths, g)
         ]);
 
         const { keys, xs, ys } = zipAligned(mapA, mapB);
-        if (keys.length < 3) {
-          throw new Error('Insufficient overlapping data');
-        }
+        if (keys.length < 3) throw new Error('Insufficient overlapping data');
 
-        const labels = keys.map(k => granularity === 'monthly' ? monthLabel(k) : k);
+        const labels = keys.map(k => g === 'monthly' ? monthLabel(k) : k);
         const r = pearsonR(xs, ys);
-        titleR.textContent = isFinite(r) ? fmt.format(r) : 'n/a';
+        titleR.textContent = isFinite(r) ? fmt3.format(r) : 'n/a';
 
-        makeLineChart(lineCanvas.getContext('2d'), labels, xs, ys, a, b, colorA, colorB);
-        makeScatterChart(scatterCanvas.getContext('2d'), xs, ys, a, b, colorA, colorB);
+        makeLineChart(lineCanvas.getContext('2d'), labels, xs, ys, labelA, labelB, colorA, colorB);
+        makeScatterChart(scatterCanvas.getContext('2d'), xs, ys, labelA, labelB, colorA, colorB);
 
         card.classList.remove('loading');
       } catch (err) {
@@ -380,7 +612,7 @@
         card.classList.add('error');
         const msg = document.createElement('div');
         msg.style.padding = '12px 14px';
-        msg.innerHTML = `Failed to load data for <strong>${a}</strong> vs <strong>${b}</strong> — ${err.message}`;
+        msg.innerHTML = `Failed to load data for <strong>${specLabel(specA)}</strong> vs <strong>${specLabel(specB)}</strong> — ${err.message}`;
         card.appendChild(msg);
       }
     }
@@ -390,6 +622,5 @@
     renderAll();
   });
 
-  // Initial render
   renderAll();
 })();
