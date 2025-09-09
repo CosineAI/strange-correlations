@@ -1,8 +1,7 @@
 /**
  * Spurious-ish Correlations — Multi-source Edition
  * Renders 50+ playful correlations from a mix of public web APIs.
- * Providers include: Wikimedia Pageviews, Open‑Meteo, ExchangeRate.host,
- * CoinGecko, OpenAlex, USGS Earthquakes, disease.sh (COVID-19), World Bank.
+ * Providers include: Wikimedia Pageviews, Open‑Meteo, CoinGecko, OpenAlex, USGS Earthquakes, disease.sh (COVID-19), World Bank.
  */
 
 (() => {
@@ -146,27 +145,7 @@
         return aggregateMonthlyAvgFromDaily(times, vals);
       }
     },
-    exchangerate: {
-      supports: { daily: true, monthly: true },
-      label: (spec) => `${spec.base}→${spec.symbol} FX`,
-      source: () => 'https://exchangerate.host/#/',
-      fetch: async (spec, backMonths, granularity) => {
-        const { startDate, endDate } = rangeDates(backMonths);
-        const url = `https://api.exchangerate.host/timeseries?start_date=${toISO(startDate)}&end_date=${toISO(endDate)}&base=${encodeURIComponent(spec.base)}&symbols=${encodeURIComponent(spec.symbol)}`;
-        const r = await fetch(url);
-        if (!r.ok) throw new Error(`ExchangeRate.host ${r.status}`);
-        const j = await r.json();
-        const rates = j.rates || {};
-        const dates = Object.keys(rates).sort();
-        const vals = dates.map(d => rates[d]?.[spec.symbol]);
-        if (granularity === 'daily') {
-          const out = new Map();
-          for (let i = 0; i < dates.length; i++) out.set(dates[i].replace(/-/g,''), vals[i]);
-          return out;
-        }
-        return aggregateMonthlyAvgFromDaily(dates, vals);
-      }
-    },
+    
     coingecko: {
       supports: { daily: true, monthly: true },
       label: (spec) => `${spec.coinName || spec.coinId} price (${spec.vsCurrency.toUpperCase()})`,
@@ -500,7 +479,7 @@
   const s = {
     wp: (title) => ({ provider: 'wp', title }),
     om: (label, lat, lon, variable) => ({ provider: 'open_meteo', label, lat, lon, variable }),
-    fx: (base, symbol) => ({ provider: 'exchangerate', base, symbol }),
+    
     cg: (coinId, vsCurrency, coinName) => ({ provider: 'coingecko', coinId, vsCurrency, coinName }),
     oa: (query) => ({ provider: 'openalex', query }),
     cv: (country, field='cases') => ({ provider: 'disease_sh', country, field }),
@@ -531,8 +510,7 @@
     s.om('Sydney max wind', -33.8688, 151.2093, 'windspeed_10m_max'),
     s.om('Mumbai precipitation', 19.0760, 72.8777, 'precipitation_sum'),
     s.om('São Paulo precipitation', -23.5505, -46.6333, 'precipitation_sum'),
-    // Exchange rates
-    s.fx('USD','EUR'), s.fx('USD','JPY'), s.fx('GBP','USD'), s.fx('EUR','CHF'), s.fx('AUD','USD'),
+    
     // Crypto (CoinGecko)
     s.cg('bitcoin','usd','Bitcoin'), s.cg('ethereum','usd','Ethereum'),
     s.cg('dogecoin','usd','Dogecoin'), s.cg('shiba-inu','usd','Shiba Inu'),
