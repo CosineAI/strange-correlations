@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Spurious-ish Correlations • Multi-source Edition</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A playful exploration of spurious correlations using many public web data sources.">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="stylesheet" href="assets/css/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1>Spurious‑ish Correlations</h1>
+      <p class="tagline">Random, strange pairings from Wikipedia, Open‑Meteo, ExchangeRate.host, CoinGecko, OpenAlex, USGS Earthquakes, disease.sh, and World Bank.</p>
+      <p class="note">
+        Data are fetched live from public APIs. These comparisons are for fun and exploration only—
+        correlation does not imply causation.
+      </p>
+    </div>
+  </header>
+
+  <main class="container">
+    <section id="controls" class="controls">
+      <div class="control">
+        <label for="months">Months of data</label>
+        <select id="months" title="Select how many months to fetch">
+          <option value="36" selected>36</option>
+          <option value="48">48</option>
+          <option value="60">60</option>
+        </select>
+      </div>
+      <div class="control">
+        <label for="granularity">Granularity</label>
+        <select id="granularity" title="Monthly or daily (daily when both sources support it)">
+          <option value="monthly" selected>Monthly</option>
+          <option value="daily">Daily</option>
+        </select>
+      </div>
+      <button id="reload">Reload charts</button>
+    </section>
+
+    <section id="charts" class="charts"></section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>
+        Sources:
+        <a href="https://wikimedia.org/api/rest_v1/#/Pageviews%20data" target="_blank" rel="noopener">Wikimedia Pageviews</a>,
+        <a href="https://open-meteo.com/en/docs" target="_blank" rel="noopener">Open‑Meteo</a>,
+        <a href="https://exchangerate.host/#/" target="_blank" rel="noopener">ExchangeRate.host</a>,
+        <a href="https://www.coingecko.com/en/api" target="_blank" rel="noopener">CoinGecko</a>,
+        <a href="https://docs.openalex.org" target="_blank" rel="noopener">OpenAlex</a>,
+        <a href="https://earthquake.usgs.gov/fdsnws/event/1/" target="_blank" rel="noopener">USGS Earthquakes</a>,
+        <a href="https://disease.sh/docs" target="_blank" rel="noopener">disease.sh</a>,
+        <a href="https://data.worldbank.org/" target="_blank" rel="noopener">World Bank</a>.
+      </p>
+      <p class="disclaimer">
+        Built for playful exploration. Time series may visually suggest relationships that aren’t real; the scatter plot and correlation coefficient
+        help reveal whether a linear relationship exists.
+      </p>
+    </div>
+  </footer>
+
+  <script src="assets/js/app.js"></script>
+</body>
+</html>
