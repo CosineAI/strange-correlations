@@ -1,7 +1,7 @@
 /**
  * Spurious-ish Correlations — Multi-source Edition
  * Renders 50+ playful correlations from a mix of public web APIs.
- * Providers include: Wikimedia Pageviews, Open‑Meteo, CoinGecko, OpenAlex, USGS Earthquakes, disease.sh (COVID-19), World Bank.
+ * Providers include: Wikimedia Pageviews, Open‑Meteo, Frankfurter (ECB FX), OpenAlex, USGS Earthquakes, disease.sh (COVID-19), World Bank.
  */
 
 (() => {
@@ -167,30 +167,7 @@
         return aggregateMonthlyAvgFromDaily(dates, vals);
       }
     },
-    coingecko: {
-      supports: { daily: true, monthly: true },
-      label: (spec) => `${spec.coinName || spec.coinId} price (${spec.vsCurrency.toUpperCase()})`,
-      source: (spec) => `https://www.coingecko.com/en/coins/${encodeURIComponent(spec.coinId)}`,
-      fetch: async (spec, backMonths, granularity) => {
-        const approxDays = Math.max(30, Math.min(3650, Math.ceil(backMonths * 31)));
-        const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(spec.coinId)}/market_chart?vs_currency=${encodeURIComponent(spec.vsCurrency)}&days=${approxDays}`;
-        const r = await fetch(url);
-        if (!r.ok) throw new Error(`CoinGecko ${r.status}`);
-        const j = await r.json();
-        const arr = j.prices || [];
-        const dates = arr.map(([ms]) => {
-          const d = new Date(ms);
-          return `${d.getFullYear()}-${`${d.getMonth()+1}`.padStart(2,'0')}-${`${d.getDate()}`.padStart(2,'0')}`;
-        });
-        const vals = arr.map(([,v]) => v);
-        if (granularity === 'daily') {
-          const out = new Map();
-          for (let i = 0; i < dates.length; i++) out.set(dates[i].replace(/-/g,''), vals[i]);
-          return out;
-        }
-        return aggregateMonthlyAvgFromDaily(dates, vals);
-      }
-    },
+    
     openalex: {
       supports: { daily: false, monthly: true },
       label: (spec) => `Publications mentioning ${spec.query}`,
@@ -501,7 +478,7 @@
     wp: (title) => ({ provider: 'wp', title }),
     om: (label, lat, lon, variable) => ({ provider: 'open_meteo', label, lat, lon, variable }),
     fx: (base, symbol) => ({ provider: 'frankfurter', base, symbol }),
-    cg: (coinId, vsCurrency, coinName) => ({ provider: 'coingecko', coinId, vsCurrency, coinName }),
+    
     oa: (query) => ({ provider: 'openalex', query }),
     cv: (country, field='cases') => ({ provider: 'disease_sh', country, field }),
     eq: (minMagnitude) => ({ provider: 'usgs_quakes', minMagnitude }),
@@ -512,7 +489,7 @@
     // Wikipedia
     s.wp('Nicolas Cage'), s.wp('Beekeeping'), s.wp('Quantum entanglement'), s.wp('Banana bread'),
     s.wp('Cryptozoology'), s.wp('Pineapple'), s.wp('Pokémon'), s.wp('Gasoline'),
-    s.wp('Corgi'), s.wp('Blockchain'), s.wp('Astrology'), s.wp('Astronomy'),
+    s.wp('Corgi'), s.wp('Astrology'), s.wp('Astronomy'),
     s.wp('Loch Ness Monster'), s.wp('Cat'), s.wp('Unidentified flying object'), s.wp('Sourdough'),
     s.wp('Peanut butter'), s.wp('Lightning'), s.wp('Kombucha'), s.wp('Crop circle'),
     s.wp('Artificial intelligence'), s.wp('Toilet paper'), s.wp('Roller coaster'), s.wp('Knitting'),
@@ -533,10 +510,7 @@
     s.om('São Paulo precipitation', -23.5505, -46.6333, 'precipitation_sum'),
     // Foreign exchange (Frankfurter)
     s.fx('USD','EUR'), s.fx('USD','JPY'), s.fx('GBP','USD'), s.fx('EUR','CHF'), s.fx('AUD','USD'),
-    // Crypto (CoinGecko)
-    s.cg('bitcoin','usd','Bitcoin'), s.cg('ethereum','usd','Ethereum'),
-    s.cg('dogecoin','usd','Dogecoin'), s.cg('shiba-inu','usd','Shiba Inu'),
-    s.cg('litecoin','usd','Litecoin'),
+    
     // OpenAlex topics
     s.oa('zombie'), s.oa('kombucha'), s.oa('banana bread'), s.oa('ufology'),
     s.oa('corgi'), s.oa('sourdough'), s.oa('volcano'), s.oa('astrology'),
