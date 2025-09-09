@@ -8,7 +8,7 @@
  *   - Wikimedia REST API (Pageviews): https://wikimedia.org/api/rest_v1/#/Pageviews%20data
  */
 
-(() =&gt; {
+(() => {
   const chartsRoot = document.getElementById('charts');
   const monthsSelect = document.getElementById('months');
   const granularitySelect = document.getElementById('granularity');
@@ -39,10 +39,10 @@
   ];
 
   // Helpers
-  const clamp = (n, min, max) =&gt; Math.max(min, Math.min(max, n));
+  const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
   const fmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 });
 
-  const monthLabel = (yyyymm) =&gt; `${yyyymm.slice(0,4)}-${yyyymm.slice(4,6)}`;
+  const monthLabel = (yyyymm) => `${yyyymm.slice(0,4)}-${yyyymm.slice(4,6)}`;
 
   function lastFullMonth() {
     const d = new Date();
@@ -136,9 +136,9 @@
 
   function pearsonR(xs, ys) {
     const n = Math.min(xs.length, ys.length);
-    if (n &lt; 3) return NaN;
+    if (n < 3) return NaN;
     let sumX = 0, sumY = 0, sumXX = 0, sumYY = 0, sumXY = 0;
-    for (let i = 0; i &lt; n; i++) {
+    for (let i = 0; i < n; i++) {
       const x = xs[i], y = ys[i];
       sumX += x; sumY += y;
       sumXX += x * x; sumYY += y * y;
@@ -153,7 +153,7 @@
   function linearRegression(xs, ys) {
     const n = Math.min(xs.length, ys.length);
     let sumX = 0, sumY = 0, sumXX = 0, sumXY = 0;
-    for (let i = 0; i &lt; n; i++) {
+    for (let i = 0; i < n; i++) {
       const x = xs[i], y = ys[i];
       sumX += x; sumY += y;
       sumXX += x * x; sumXY += x * y;
@@ -267,7 +267,7 @@
           },
           tooltip: {
             callbacks: {
-              label: (ctx) =&gt; {
+              label: (ctx) => {
                 const v = ctx.parsed.y;
                 return `${ctx.dataset.label}: ${Intl.NumberFormat().format(v)} views`;
               }
@@ -279,7 +279,7 @@
   }
 
   function makeScatterChart(ctx, xs, ys, labelA, labelB, colorA, colorB) {
-    const points = xs.map((x, i) =&gt; ({ x, y: ys[i] }));
+    const points = xs.map((x, i) => ({ x, y: ys[i] }));
     const { m, b } = linearRegression(xs, ys);
     const minX = Math.min(...xs);
     const maxX = Math.max(...xs);
@@ -331,9 +331,9 @@
           },
           tooltip: {
             callbacks: {
-              label: (ctx) =&gt; {
+              label: (ctx) => {
                 const p = ctx.raw;
-                if (p &amp;&amp; typeof p.x === 'number' &amp;&amp; typeof p.y === 'number') {
+                if (p && typeof p.x === 'number' && typeof p.y === 'number') {
                   return `(${Intl.NumberFormat().format(p.x)}, ${Intl.NumberFormat().format(p.y)})`;
                 }
                 return ctx.formattedValue;
@@ -350,7 +350,7 @@
     const backMonths = clamp(parseInt(monthsSelect.value, 10) || 36, 6, 120);
     const granularity = granularitySelect.value === 'daily' ? 'daily' : 'monthly';
 
-    for (let i = 0; i &lt; PAIRS.length; i++) {
+    for (let i = 0; i < PAIRS.length; i++) {
       const [a, b] = PAIRS[i];
       const { card, titleR, lineCanvas, scatterCanvas } = createCard(a, b);
       const colorA = colorFromIndex(i * 2);
@@ -363,11 +363,11 @@
         ]);
 
         const { keys, xs, ys } = zipAligned(mapA, mapB);
-        if (keys.length &lt; 3) {
+        if (keys.length < 3) {
           throw new Error('Insufficient overlapping data');
         }
 
-        const labels = keys.map(k =&gt; granularity === 'monthly' ? monthLabel(k) : k);
+        const labels = keys.map(k => granularity === 'monthly' ? monthLabel(k) : k);
         const r = pearsonR(xs, ys);
         titleR.textContent = isFinite(r) ? fmt.format(r) : 'n/a';
 
@@ -386,7 +386,7 @@
     }
   }
 
-  reloadBtn.addEventListener('click', () =&gt; {
+  reloadBtn.addEventListener('click', () => {
     renderAll();
   });
 
